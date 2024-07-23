@@ -29,7 +29,7 @@ env:
 jobs:
   process:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 360  # 在这里添加超时设置，设为6小时
     steps:
       - name: Checkout
         uses: actions/checkout@v4
