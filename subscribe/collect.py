@@ -254,27 +254,29 @@ def aggregate(args: argparse.Namespace) -> None:
         nodes = clash.filter_proxies(proxies).get("proxies", [])
     else:
         binpath = os.path.join(workspace, clash_bin)
-        confif_file = "config.yaml"
-        proxies = clash.generate_config(workspace, list(proxies), confif_file)
+        filename = "config.yaml"
+        proxies = clash.generate_config(workspace, list(proxies), filename)
 
         # 可执行权限
         utils.chmod(binpath)
 
-        logger.info(f"startup clash now, workspace: {workspace}, config: {confif_file}")
+        logger.info(f"startup clash now, workspace: {workspace}, config: {filename}")
         process = subprocess.Popen(
             [
                 binpath,
                 "-d",
                 workspace,
                 "-f",
-                os.path.join(workspace, confif_file),
+                os.path.join(workspace, filename),
             ]
         )
         logger.info(f"clash start success, begin check proxies, num: {len(proxies)}")
 
         time.sleep(random.randint(3, 6))
         params = [
-            [p, clash.EXTERNAL_CONTROLLER, 5000, args.url, args.delay, False] for p in proxies if isinstance(p, dict)
+            [p, clash.EXTERNAL_CONTROLLER, args.timeout, args.url, args.delay, False]
+            for p in proxies
+            if isinstance(p, dict)
         ]
 
         masks = utils.multi_thread_run(
@@ -307,11 +309,17 @@ def aggregate(args: argparse.Namespace) -> None:
 
     data = {"proxies": nodes}
     urls = list(subscriptions)
-    source = "proxies.yaml"
 
     # 如果文件夹不存在则创建
     os.makedirs(DATA_BASE, exist_ok=True)
 
+    # 保存为 mixed 格式
+    to_mixed = args.both or args.mixed
+
+    # 保存为 clash 格式
+    to_clash = args.both or not args.mixed
+
+    source, clash_file, mixed_file = "proxies.yaml", "clash.yaml", "v2ray.txt"
     supplier = os.path.join(PATH, "subconverter", source)
     if os.path.exists(supplier) and os.path.isfile(supplier):
         os.remove(supplier)
@@ -323,16 +331,13 @@ def aggregate(args: argparse.Namespace) -> None:
         os.remove(generate_conf)
 
     targets, records = [], {}
-    for target in args.targets:
-        target = utils.trim(target).lower()
-        convert_name = f'convert_{target.replace("&", "_").replace("=", "_")}'
-
-        filename = subconverter.get_filename(target=target)
-        list_only = False if target == "v2ray" or target == "mixed" or "ss" in target else not args.all
-        targets.append((convert_name, filename, target, list_only, args.vitiate))
+    if to_clash:
+        targets.append(("convert_clash", clash_file, "clash", not args.all, args.vitiate))
+    if to_mixed:
+        targets.append(("convert_mixed", mixed_file, "mixed", False, args.vitiate))
 
     for t in targets:
-        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], True, t[3], t[4])
+        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], t[3], t[4])
         if not success:
             logger.error(f"cannot generate subconverter config file for target: {t[2]}")
             continue
@@ -407,28 +412,8 @@ def aggregate(args: argparse.Namespace) -> None:
     workflow.cleanup(workspace, [])
 
 
-class CustomHelpFormatter(argparse.HelpFormatter):
-    def _format_action_invocation(self, action):
-        if action.choices:
-            parts = []
-            if action.option_strings:
-                parts.extend(action.option_strings)
-
-                # 移除使用帮助信息中 -t 或 --targets 附带的过长的可选项信息
-                if action.nargs != 0 and action.option_strings != ["-t", "--targets"]:
-                    default = action.dest.upper()
-                    args_string = self._format_args(action, default)
-                    parts[-1] += " " + args_string
-            else:
-                args_string = self._format_args(action, action.dest)
-                parts.append(args_string)
-            return ", ".join(parts)
-        else:
-            return super()._format_action_invocation(action)
-
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(formatter_class=CustomHelpFormatter)
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "-a",
         "--all",
@@ -436,6 +421,15 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="generate full configuration for clash",
+    )
+
+    parser.add_argument(
+        "-b",
+        "--both",
+        dest="both",
+        action="store_true",
+        default=False,
+        help="save results in both clash and mixed formats, only clash is saved by default",
     )
 
     parser.add_argument(
@@ -511,6 +505,15 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "-m",
+        "--mixed",
+        dest="mixed",
+        action="store_true",
+        default=False,
+        help="convert and save as mixed format",
+    )
+
+    parser.add_argument(
         "-n",
         "--num",
         type=int,
@@ -557,11 +560,11 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-t",
-        "--targets",
-        nargs="+",
-        choices=subconverter.CONVERT_TARGETS,
-        default=["clash", "v2ray", "singbox"],
-        help=f"choose one or more generated profile type. default to clash, v2ray and singbox. supported: {subconverter.CONVERT_TARGETS}",
+        "--timeout",
+        type=int,
+        required=False,
+        default=5000,
+        help="timeout",
     )
 
     parser.add_argument(
@@ -576,9 +579,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-v",
         "--vitiate",
-        dest="vitiate",
-        action="store_true",
-        default=False,
+        type=int,
+        required=False,
+        default=0,
         help="ignoring default proxies filter rules",
     )
 
