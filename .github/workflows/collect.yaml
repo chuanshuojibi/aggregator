@@ -65,11 +65,12 @@ jobs:
           fi
 
       - name: Collect
-        run: python -u subscribe/collect.py --all --overwrite --skip
-         if [ $? -ne 0 ]; then
-          echo "Collect step failed"
-          exit 1
-         fi
+        run: |
+         python -u subscribe/collect.py --all --overwrite --skip
+          if [ $? -ne 0 ]; then
+           echo "Collect step failed"
+           exit 1
+          fi
 
       - name: Timestamp
         run: date
